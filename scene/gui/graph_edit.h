@@ -99,7 +99,6 @@ private:
 	bool dragging;
 	bool just_selected;
 	Vector2 drag_accum;
-	Point2 drag_origin; // Workaround for GH-5907
 
 	float zoom;
 
@@ -126,6 +125,9 @@ private:
 	void _update_scroll();
 	void _scroll_moved(double);
 	void _gui_input(const Ref<InputEvent> &p_ev);
+	void _mouse_motion_input(const Ref<InputEventMouseMotion> &mm);
+	void _mouse_button_input(const Ref<InputEventMouseButton> &b);
+	void _key_input(const Ref<InputEventKey> &k);
 
 	Control *connections_layer;
 	GraphEditFilter *top_layer;

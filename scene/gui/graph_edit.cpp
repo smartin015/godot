@@ -802,19 +802,43 @@ void GraphEdit::set_selected(Node *p_child) {
 }
 
 void GraphEdit::_gui_input(const Ref<InputEvent> &p_ev) {
-
 	Ref<InputEventMouseMotion> mm = p_ev;
-	if (mm.is_valid() && (mm->get_button_mask() & BUTTON_MASK_MIDDLE || (mm->get_button_mask() & BUTTON_MASK_LEFT && Input::get_singleton()->is_key_pressed(KEY_SPACE)))) {
+	if (mm.is_valid()) {
+               	_mouse_motion_input(mm);
+       	}
+       
+       	Ref<InputEventMouseButton> b = p_ev;
+       	if (b.is_valid()) {
+               	_mouse_button_input(b);
+       	}
+
+       	Ref<InputEventKey> k = p_ev;
+       	if (k.is_valid()) {
+               	_key_input(k);
+       	}
+
+       	Ref<InputEventMagnifyGesture> magnify_gesture = p_ev;
+       	if (magnify_gesture.is_valid()) {
+		set_zoom_custom(zoom * magnify_gesture->get_factor(), magnify_gesture->get_position());
+       	}
+
+       	Ref<InputEventPanGesture> pan_gesture = p_ev;
+       	if (pan_gesture.is_valid()) {
+		h_scroll->set_value(h_scroll->get_value() + h_scroll->get_page() * pan_gesture->get_delta().x / 8);
+       		v_scroll->set_value(v_scroll->get_value() + v_scroll->get_page() * pan_gesture->get_delta().y / 8);
+       	}
+}
+
+void GraphEdit::_mouse_motion_input(const Ref<InputEventMouseMotion> &mm) {
+	if (mm->get_button_mask() & BUTTON_MASK_MIDDLE || (mm->get_button_mask() & BUTTON_MASK_LEFT && Input::get_singleton()->is_key_pressed(KEY_SPACE))) {
 		h_scroll->set_value(h_scroll->get_value() - mm->get_relative().x);
 		v_scroll->set_value(v_scroll->get_value() - mm->get_relative().y);
 	}
 
-	if (mm.is_valid() && dragging) {
+	if (dragging) {
 
 		just_selected = true;
-		// TODO: Remove local mouse pos hack if/when InputEventMouseMotion is fixed to support floats
-		//drag_accum+=Vector2(mm->get_relative().x,mm->get_relative().y);
-		drag_accum = get_local_mouse_position() - drag_origin;
+		drag_accum += mm->get_relative();
 		for (int i = get_child_count() - 1; i >= 0; i--) {
 			GraphNode *gn = Object::cast_to<GraphNode>(get_child(i));
 			if (gn && gn->is_selected()) {
@@ -833,8 +857,8 @@ void GraphEdit::_gui_input(const Ref<InputEvent> &p_ev) {
 		}
 	}
 
-	if (mm.is_valid() && box_selecting) {
-		box_selecting_to = get_local_mouse_position();
+	if (box_selecting) {
+		box_selecting_to = mm->get_position();
 
 		box_selecting_rect = Rect2(MIN(box_selecting_from.x, box_selecting_to.x),
 				MIN(box_selecting_from.y, box_selecting_to.y),
@@ -859,232 +883,213 @@ void GraphEdit::_gui_input(const Ref<InputEvent> &p_ev) {
 
 		top_layer->update();
 	}
+}
 
-	Ref<InputEventMouseButton> b = p_ev;
-	if (b.is_valid()) {
-
-		if (b->get_button_index() == BUTTON_RIGHT && b->is_pressed()) {
-			if (box_selecting) {
-				box_selecting = false;
-				for (int i = get_child_count() - 1; i >= 0; i--) {
-
-					GraphNode *gn = Object::cast_to<GraphNode>(get_child(i));
-					if (!gn)
-						continue;
-
-					gn->set_selected(previus_selected.find(gn) != NULL);
-				}
-				top_layer->update();
-			} else {
-				if (connecting) {
-					connecting = false;
-					top_layer->update();
-				} else {
-					emit_signal("popup_request", b->get_global_position());
-				}
-			}
-		}
-
-		if (b->get_button_index() == BUTTON_LEFT && !b->is_pressed() && dragging) {
-			if (!just_selected && drag_accum == Vector2() && Input::get_singleton()->is_key_pressed(KEY_CONTROL)) {
-				//deselect current node
-				for (int i = get_child_count() - 1; i >= 0; i--) {
-					GraphNode *gn = Object::cast_to<GraphNode>(get_child(i));
-
-					if (gn) {
-						Rect2 r = gn->get_rect();
-						r.size *= zoom;
-						if (r.has_point(get_local_mouse_position()))
-							gn->set_selected(false);
-					}
-				}
-			}
-
-			if (drag_accum != Vector2()) {
-
-				emit_signal("_begin_node_move");
-
-				for (int i = get_child_count() - 1; i >= 0; i--) {
-					GraphNode *gn = Object::cast_to<GraphNode>(get_child(i));
-					if (gn && gn->is_selected())
-						gn->set_drag(false);
-				}
-
-				emit_signal("_end_node_move");
-			}
-
-			dragging = false;
-
-			top_layer->update();
-			update();
-			connections_layer->update();
-		}
-
-		if (b->get_button_index() == BUTTON_LEFT && b->is_pressed()) {
-
-			GraphNode *gn = NULL;
-
+void GraphEdit::_mouse_button_input(const Ref<InputEventMouseButton> &b) {
+	if (b->get_button_index() == BUTTON_RIGHT && b->is_pressed()) {
+		if (box_selecting) {
+			box_selecting = false;
 			for (int i = get_child_count() - 1; i >= 0; i--) {
 
-				GraphNode *gn_selected = Object::cast_to<GraphNode>(get_child(i));
+				GraphNode *gn = Object::cast_to<GraphNode>(get_child(i));
+				if (!gn)
+					continue;
 
-				if (gn_selected) {
-					if (gn_selected->is_resizing())
-						continue;
+				gn->set_selected(previus_selected.find(gn) != NULL);
+			}
+			top_layer->update();
+		} else {
+			if (connecting) {
+				connecting = false;
+				top_layer->update();
+			} else {
+				emit_signal("popup_request", b->get_global_position());
+			}
+		}
+	}
 
-					if (gn_selected->has_point(gn_selected->get_local_mouse_position())) {
-						gn = gn_selected;
-						break;
-					}
+	if (b->get_button_index() == BUTTON_LEFT && !b->is_pressed() && dragging) {
+		if (!just_selected && drag_accum == Vector2() && Input::get_singleton()->is_key_pressed(KEY_CONTROL)) {
+			//deselect current node
+			for (int i = get_child_count() - 1; i >= 0; i--) {
+				GraphNode *gn = Object::cast_to<GraphNode>(get_child(i));
+
+				if (gn) {
+					Rect2 r = gn->get_rect();
+					r.size *= zoom;
+					if (r.has_point(b->get_position()))
+						gn->set_selected(false);
 				}
 			}
+		}
 
-			if (gn) {
+		if (drag_accum != Vector2()) {
 
-				if (_filter_input(b->get_position()))
-					return;
+			emit_signal("_begin_node_move");
 
-				dragging = true;
-				drag_accum = Vector2();
-				drag_origin = get_local_mouse_position();
-				just_selected = !gn->is_selected();
-				if (!gn->is_selected() && !Input::get_singleton()->is_key_pressed(KEY_CONTROL)) {
-					for (int i = 0; i < get_child_count(); i++) {
-						GraphNode *o_gn = Object::cast_to<GraphNode>(get_child(i));
-						if (o_gn) {
-							if (o_gn == gn) {
-								o_gn->set_selected(true);
-							} else {
-								if (o_gn->is_selected()) {
-									emit_signal("node_unselected", o_gn);
-								}
-								o_gn->set_selected(false);
-							}
-						}
-					}
+			for (int i = get_child_count() - 1; i >= 0; i--) {
+				GraphNode *gn = Object::cast_to<GraphNode>(get_child(i));
+				if (gn && gn->is_selected())
+					gn->set_drag(false);
+			}
+
+			emit_signal("_end_node_move");
+		}
+
+		dragging = false;
+
+		top_layer->update();
+		update();
+		connections_layer->update();
+	}
+
+	if (b->get_button_index() == BUTTON_LEFT && b->is_pressed()) {
+
+		GraphNode *gn = NULL;
+
+		for (int i = get_child_count() - 1; i >= 0; i--) {
+
+			GraphNode *gn_selected = Object::cast_to<GraphNode>(get_child(i));
+
+			if (gn_selected) {
+				if (gn_selected->is_resizing())
+					continue;
+
+				if (gn_selected->has_point(b->get_position() - gn_selected->get_position())) {
+					gn = gn_selected;
+					break;
 				}
+			}
+		}
 
-				gn->set_selected(true);
+		if (gn) {
+
+			if (_filter_input(b->get_position()))
+				return;
+
+			dragging = true;
+			drag_accum = Vector2();
+			just_selected = !gn->is_selected();
+			if (!gn->is_selected() && !Input::get_singleton()->is_key_pressed(KEY_CONTROL)) {
 				for (int i = 0; i < get_child_count(); i++) {
 					GraphNode *o_gn = Object::cast_to<GraphNode>(get_child(i));
-					if (!o_gn)
-						continue;
-					if (o_gn->is_selected())
-						o_gn->set_drag(true);
-				}
-
-			} else {
-				if (_filter_input(b->get_position()))
-					return;
-				if (Input::get_singleton()->is_key_pressed(KEY_SPACE))
-					return;
-
-				box_selecting = true;
-				box_selecting_from = get_local_mouse_position();
-				if (b->get_control()) {
-					box_selection_mode_additive = true;
-					previus_selected.clear();
-					for (int i = get_child_count() - 1; i >= 0; i--) {
-
-						GraphNode *gn2 = Object::cast_to<GraphNode>(get_child(i));
-						if (!gn2 || !gn2->is_selected())
-							continue;
-
-						previus_selected.push_back(gn2);
-					}
-				} else if (b->get_shift()) {
-					box_selection_mode_additive = false;
-					previus_selected.clear();
-					for (int i = get_child_count() - 1; i >= 0; i--) {
-
-						GraphNode *gn2 = Object::cast_to<GraphNode>(get_child(i));
-						if (!gn2 || !gn2->is_selected())
-							continue;
-
-						previus_selected.push_back(gn2);
-					}
-				} else {
-					box_selection_mode_additive = true;
-					previus_selected.clear();
-					for (int i = get_child_count() - 1; i >= 0; i--) {
-
-						GraphNode *gn2 = Object::cast_to<GraphNode>(get_child(i));
-						if (!gn2)
-							continue;
-						if (gn2->is_selected()) {
-							emit_signal("node_unselected", gn2);
+					if (o_gn) {
+						if (o_gn == gn) {
+							o_gn->set_selected(true);
+						} else {
+							if (o_gn->is_selected()) {
+								emit_signal("node_unselected", o_gn);
+							}
+							o_gn->set_selected(false);
 						}
-						gn2->set_selected(false);
 					}
 				}
 			}
-		}
 
-		if (b->get_button_index() == BUTTON_LEFT && !b->is_pressed() && box_selecting) {
-			box_selecting = false;
-			previus_selected.clear();
-			top_layer->update();
-		}
+			gn->set_selected(true);
+			for (int i = 0; i < get_child_count(); i++) {
+				GraphNode *o_gn = Object::cast_to<GraphNode>(get_child(i));
+				if (!o_gn)
+					continue;
+				if (o_gn->is_selected())
+					o_gn->set_drag(true);
+			}
 
-		if (b->get_button_index() == BUTTON_WHEEL_UP && b->is_pressed()) {
-			//too difficult to get right
-			//set_zoom(zoom*ZOOM_SCALE);
-		}
+		} else {
+			if (_filter_input(b->get_position()))
+				return;
+			if (Input::get_singleton()->is_key_pressed(KEY_SPACE))
+				return;
 
-		if (b->get_button_index() == BUTTON_WHEEL_DOWN && b->is_pressed()) {
-			//too difficult to get right
-			//set_zoom(zoom/ZOOM_SCALE);
-		}
-		if (b->get_button_index() == BUTTON_WHEEL_UP && !Input::get_singleton()->is_key_pressed(KEY_SHIFT)) {
-			v_scroll->set_value(v_scroll->get_value() - v_scroll->get_page() * b->get_factor() / 8);
-		}
-		if (b->get_button_index() == BUTTON_WHEEL_DOWN && !Input::get_singleton()->is_key_pressed(KEY_SHIFT)) {
-			v_scroll->set_value(v_scroll->get_value() + v_scroll->get_page() * b->get_factor() / 8);
-		}
-		if (b->get_button_index() == BUTTON_WHEEL_RIGHT || (b->get_button_index() == BUTTON_WHEEL_DOWN && Input::get_singleton()->is_key_pressed(KEY_SHIFT))) {
-			h_scroll->set_value(h_scroll->get_value() + h_scroll->get_page() * b->get_factor() / 8);
-		}
-		if (b->get_button_index() == BUTTON_WHEEL_LEFT || (b->get_button_index() == BUTTON_WHEEL_UP && Input::get_singleton()->is_key_pressed(KEY_SHIFT))) {
-			h_scroll->set_value(h_scroll->get_value() - h_scroll->get_page() * b->get_factor() / 8);
+			box_selecting = true;
+			box_selecting_from = b->get_position();
+			if (b->get_control()) {
+				box_selection_mode_additive = true;
+				previus_selected.clear();
+				for (int i = get_child_count() - 1; i >= 0; i--) {
+
+					GraphNode *gn2 = Object::cast_to<GraphNode>(get_child(i));
+					if (!gn2 || !gn2->is_selected())
+						continue;
+
+					previus_selected.push_back(gn2);
+				}
+			} else if (b->get_shift()) {
+				box_selection_mode_additive = false;
+				previus_selected.clear();
+				for (int i = get_child_count() - 1; i >= 0; i--) {
+
+					GraphNode *gn2 = Object::cast_to<GraphNode>(get_child(i));
+					if (!gn2 || !gn2->is_selected())
+						continue;
+
+					previus_selected.push_back(gn2);
+				}
+			} else {
+				box_selection_mode_additive = true;
+				previus_selected.clear();
+				for (int i = get_child_count() - 1; i >= 0; i--) {
+
+					GraphNode *gn2 = Object::cast_to<GraphNode>(get_child(i));
+					if (!gn2)
+						continue;
+					if (gn2->is_selected()) {
+						emit_signal("node_unselected", gn2);
+					}
+					gn2->set_selected(false);
+				}
+			}
 		}
 	}
 
-	Ref<InputEventKey> k = p_ev;
-
-	if (k.is_valid()) {
-
-		if (k->get_scancode() == KEY_D && k->is_pressed() && k->get_command()) {
-			emit_signal("duplicate_nodes_request");
-			accept_event();
-		}
-
-		if (k->get_scancode() == KEY_C && k->is_pressed() && k->get_command()) {
-			emit_signal("copy_nodes_request");
-			accept_event();
-		}
-
-		if (k->get_scancode() == KEY_V && k->is_pressed() && k->get_command()) {
-			emit_signal("paste_nodes_request");
-			accept_event();
-		}
-
-		if (k->get_scancode() == KEY_DELETE && k->is_pressed()) {
-			emit_signal("delete_nodes_request");
-			accept_event();
-		}
+	if (b->get_button_index() == BUTTON_LEFT && !b->is_pressed() && box_selecting) {
+		box_selecting = false;
+		previus_selected.clear();
+		top_layer->update();
 	}
 
-	Ref<InputEventMagnifyGesture> magnify_gesture = p_ev;
-	if (magnify_gesture.is_valid()) {
-
-		set_zoom_custom(zoom * magnify_gesture->get_factor(), magnify_gesture->get_position());
+	if (b->get_button_index() == BUTTON_WHEEL_UP && b->is_pressed()) {
+		//too difficult to get right
+		//set_zoom(zoom*ZOOM_SCALE);
 	}
 
-	Ref<InputEventPanGesture> pan_gesture = p_ev;
-	if (pan_gesture.is_valid()) {
+	if (b->get_button_index() == BUTTON_WHEEL_DOWN && b->is_pressed()) {
+		//too difficult to get right
+		//set_zoom(zoom/ZOOM_SCALE);
+	}
+	if (b->get_button_index() == BUTTON_WHEEL_UP && !Input::get_singleton()->is_key_pressed(KEY_SHIFT)) {
+		v_scroll->set_value(v_scroll->get_value() - v_scroll->get_page() * b->get_factor() / 8);
+	}
+	if (b->get_button_index() == BUTTON_WHEEL_DOWN && !Input::get_singleton()->is_key_pressed(KEY_SHIFT)) {
+		v_scroll->set_value(v_scroll->get_value() + v_scroll->get_page() * b->get_factor() / 8);
+	}
+	if (b->get_button_index() == BUTTON_WHEEL_RIGHT || (b->get_button_index() == BUTTON_WHEEL_DOWN && Input::get_singleton()->is_key_pressed(KEY_SHIFT))) {
+		h_scroll->set_value(h_scroll->get_value() + h_scroll->get_page() * b->get_factor() / 8);
+	}
+	if (b->get_button_index() == BUTTON_WHEEL_LEFT || (b->get_button_index() == BUTTON_WHEEL_UP && Input::get_singleton()->is_key_pressed(KEY_SHIFT))) {
+		h_scroll->set_value(h_scroll->get_value() - h_scroll->get_page() * b->get_factor() / 8);
+	}
+}
 
-		h_scroll->set_value(h_scroll->get_value() + h_scroll->get_page() * pan_gesture->get_delta().x / 8);
-		v_scroll->set_value(v_scroll->get_value() + v_scroll->get_page() * pan_gesture->get_delta().y / 8);
+void GraphEdit::_key_input(const Ref<InputEventKey> &k) {
+	if (k->get_scancode() == KEY_D && k->is_pressed() && k->get_command()) {
+		emit_signal("duplicate_nodes_request");
+		accept_event();
+	}
+
+	if (k->get_scancode() == KEY_C && k->is_pressed() && k->get_command()) {
+		emit_signal("copy_nodes_request");
+		accept_event();
+	}
+
+	if (k->get_scancode() == KEY_V && k->is_pressed() && k->get_command()) {
+		emit_signal("paste_nodes_request");
+		accept_event();
+	}
+
+	if (k->get_scancode() == KEY_DELETE && k->is_pressed()) {
+		emit_signal("delete_nodes_request");
+		accept_event();
 	}
 }
 
